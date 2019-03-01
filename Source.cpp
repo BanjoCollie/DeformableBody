@@ -58,13 +58,14 @@ float * startLength;
 float * startVolume;
 	// Parameters
 float timestep = 0.003;
-float mass = 10000.0f;
+float mass = 50.0f;
 float inverseMassLimit = 1.0f;
-float kv = 100000.0f; // Volume perserving constant
-float dampv = 1.0f; // Dampening for volume perserving force
-float kd = 100000.0f; // Distance perserving constant
-float dampd = 5.0f; // Dampening for distance perserving force
+float kv = 1000000.0f; // Volume perserving constant
+float dampv = 5.0f; // Dampening for volume perserving force
+float kd = 10000.0f; // Distance perserving constant
+float dampd = 1.0f; // Dampening for distance perserving force
 float startHeight = 0.75f;
+
 
 int main()
 {
