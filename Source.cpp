@@ -44,6 +44,7 @@ float lastFrame = 0.0f; // Time of last frame
 // deformable mesh
 int numPoints;
 glm::vec3 * pointCoords = NULL;
+glm::vec3 * lastPointCoords = NULL;
 int numEdges;
 unsigned int * edgeIndices = NULL; // Every 2 ints are the indices of and edge
 int numTetra;
@@ -56,10 +57,14 @@ glm::vec3 * forces;
 float * startLength;
 float * startVolume;
 	// Parameters
-float timestep = 0.001;
-float kv = 1000000.0f; // Volume perserving constant
+float timestep = 0.003;
+float mass = 10000.0f;
+float inverseMassLimit = 1.0f;
+float kv = 100000.0f; // Volume perserving constant
+float dampv = 1.0f; // Dampening for volume perserving force
 float kd = 100000.0f; // Distance perserving constant
-float dampd = 20.0f; // Dampening for distance perserving force
+float dampd = 5.0f; // Dampening for distance perserving force
+float startHeight = 0.75f;
 
 int main()
 {
@@ -103,14 +108,20 @@ int main()
 		// get total number of points
 		pointFile >> numPoints;
 		pointCoords = new glm::vec3[numPoints];
+		lastPointCoords = new glm::vec3[numPoints];
 		// Read a few times to get through first line
 		int dimension, numAttrib, boundary;
 		pointFile >> dimension >> numAttrib >> boundary;
 		// now read actual data
 		while (pointFile >> index >> x >> y >> z)
 		{
-			y += 0.75; //Puts lowest point slighly above 0
+			float scale = 1.0f;
+			x *= scale;
+			y *= scale;
+			z *= scale;
+			y += startHeight;
 			pointCoords[index] = glm::vec3(x, y, z);
+			lastPointCoords[index] = glm::vec3(x, y, z);
 		}
 		pointFile.close();
 	}
@@ -209,9 +220,9 @@ int main()
 			m = 0.0f;
 		}
 		m = m / totalMass;
-		m *= 10000;
+		m *= mass;
 		m = 1.0f / m;
-		if (m > 1.0f)
+		if (m > inverseMassLimit)
 		{
 			m = 1.0f;
 		}
@@ -268,12 +279,32 @@ int main()
 			glm::vec3 e1 = pointCoords[tetraIndices[i*4+1]] - pointCoords[tetraIndices[i*4]];
 			glm::vec3 e2 = pointCoords[tetraIndices[i*4+2]] - pointCoords[tetraIndices[i*4]];
 			glm::vec3 e3 = pointCoords[tetraIndices[i*4+3]] - pointCoords[tetraIndices[i*4]];
-			float cv = (abs(glm::dot(e1, glm::cross(e2, e3)) / 2.0) - startVolume[i]) / 3.0f;
+			float cv = (abs(glm::dot(e1, glm::cross(e2, e3)) / 6.0) - startVolume[i]);
 
+			//*
+			glm::vec3 dir, relVel;
+			dir = glm::normalize(glm::cross(e2 - e1, e3 - e1));
+			relVel = (3.0f * velocities[tetraIndices[i * 4]] - velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4 + 3]]);
+			forces[tetraIndices[i * 4]] += (kv * cv - dampv * glm::dot(relVel, dir)) * dir;
+
+			dir = glm::normalize(glm::cross(e3, e2));
+			relVel = (3.0f * velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4]] - velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4 + 3]]);
+			forces[tetraIndices[i * 4 + 1]] += (kv * cv - dampv * glm::dot(relVel, dir)) * dir;
+
+			dir = glm::normalize(glm::cross(e1, e3));
+			relVel = (3.0f * velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4]] - velocities[tetraIndices[i * 4 + 3]]);
+			forces[tetraIndices[i * 4 + 2]] += (kv * cv - dampv * glm::dot(relVel, dir)) * dir;
+
+			dir = glm::normalize(glm::cross(e2, e1));
+			relVel = (3.0f * velocities[tetraIndices[i * 4 + 3]] - velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4]]);
+			forces[tetraIndices[i * 4 + 3]] += (kv * cv - dampv * glm::dot(relVel, dir)) * dir;
+			//*/
+			/*
 			forces[tetraIndices[i*4]] += kv * cv * glm::cross(e2-e1, e3-e1);
 			forces[tetraIndices[i*4 + 1]] += kv * cv * glm::cross(e3, e2);
 			forces[tetraIndices[i*4 + 2]] += kv * cv * glm::cross(e1, e3);
 			forces[tetraIndices[i*4 + 3]] += kv * cv * glm::cross(e2, e1);
+			//*/
 		}
 			// Compute distance preserving force
 		for (int i = 0; i < numEdges; i += 1)
@@ -290,20 +321,51 @@ int main()
 				forces[edgeIndices[i * 2]] += -(force+damp) * dir;
 				forces[edgeIndices[i * 2 + 1]] += (force + damp) * dir;
 			}
+
 		}
 			// integrate forces
 		for (int i = 0; i < numPoints; i++)
 		{
+			// Eular
+			/*
 			velocities[i] += forces[i] * masses[i] * deltaTime;
 			velocities[i] += glm::vec3(0.0f, -9.8f, 0.0f) * deltaTime;
 			pointCoords[i] = pointCoords[i] + velocities[i] * deltaTime;
+			//*/
+			//*
+			// Verlet
+			glm::vec3 currentPos = pointCoords[i];
+			forces[i] += glm::vec3(0.0f, -9.8f, 0.0f) / masses[i];
+			pointCoords[i] = 2.0f * pointCoords[i] - lastPointCoords[i] + deltaTime * deltaTime * forces[i] * masses[i];
+			velocities[i] = (pointCoords[i] - lastPointCoords[i]) / (2.0f * deltaTime);
+			lastPointCoords[i] = currentPos;
+			//*/
 			// Check for collisions
 			if (pointCoords[i][1] <= 0.0f)
 			{
 				pointCoords[i][1] = 0.0f;
-				velocities[i][1] *= -0.1f;
+				velocities[i][1] = 0.0f;
 			}
 		}
+		// deformation limits
+		//*
+		for (int i = 0; i < numEdges; i += 1)
+		{
+			glm::vec3 offset = pointCoords[edgeIndices[i * 2]] - pointCoords[edgeIndices[i * 2 + 1]];
+			glm::vec3 dir = glm::normalize(offset);
+			float len = glm::length(offset);
+			if (len==len)
+			{
+				float alpha = 1.0f;
+				if (len > alpha * startLength[i])
+				{
+					float massRatio = masses[edgeIndices[i * 2]] / (masses[edgeIndices[i * 2]] + masses[edgeIndices[i * 2 + 1]]);
+					pointCoords[edgeIndices[i * 2]] -= massRatio * (len - alpha * startLength[i]) * dir;
+					pointCoords[edgeIndices[i * 2 + 1]] += (1-massRatio) * (len - alpha * startLength[i]) * dir;
+				}
+			}
+		}
+		//*/
 
 		// Put data into buffers for openGL
 		glBindVertexArray(deformVAO);
@@ -341,7 +403,7 @@ int main()
 
 		deformShader.setMat4("view", view);
 		deformShader.setMat4("projection", projection);
-		model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		deformShader.setMat4("model", model);
 
 		glBindVertexArray(deformVAO);
