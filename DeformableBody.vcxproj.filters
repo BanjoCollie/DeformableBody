@@ -30,5 +30,6 @@
   <ItemGroup>
     <None Include="deformRender.vert" />
     <None Include="deformRender.frag" />
+    <None Include="deformRender.geom" />
   </ItemGroup>
 </Project>

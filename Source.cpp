@@ -30,7 +30,7 @@ const int SCR_WIDTH = 1280;
 const int SCR_HEIGHT = 720;
 
 // camera
-glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 2.0f);
+glm::vec3 cameraPos = glm::vec3(0.0f, 1.0f, 2.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 float yaw = -90.0f, pitch = 0.0f;
@@ -48,6 +48,8 @@ int numEdges;
 unsigned int * edgeIndices = NULL; // Every 2 ints are the indices of and edge
 int numTetra;
 unsigned int * tetraIndices = NULL; // Every 4 ints are the indices of a tetrahedron
+int numFaces;
+unsigned int * faceIndices = NULL; // Every 3 ints are the indices of a face
 float * masses;
 glm::vec3 * velocities;
 glm::vec3 * forces;
@@ -57,7 +59,7 @@ float * startVolume;
 float timestep = 0.001;
 float kv = 1000000.0f; // Volume perserving constant
 float kd = 100000.0f; // Distance perserving constant
-float dampd = 10.0f; // Dampening for distance perserving force
+float dampd = 20.0f; // Dampening for distance perserving force
 
 int main()
 {
@@ -84,6 +86,7 @@ int main()
 
 	// Enable openGL settings
 	glEnable(GL_CULL_FACE);
+	glFrontFace(GL_CW);
 	glEnable(GL_DEPTH_TEST);
 
 	// Setup ----------------------------------
@@ -145,6 +148,23 @@ int main()
 			tetraIndices[tetraIndex * 4 + 3] = p4;
 		}
 		tetraFile.close();
+	}
+	// load faces
+	std::ifstream faceFile;
+	faceFile.open("mesh/spot.1.face");
+	if (faceFile.is_open())
+	{
+		unsigned int faceIndex, p1, p2, p3, boundary;
+		faceFile >> numFaces;
+		faceIndices = new unsigned int[3 * numFaces];
+		faceFile >> boundary;
+		while (faceFile >> faceIndex >> p1 >> p2 >> p3 >> boundary)
+		{
+			faceIndices[faceIndex * 3] = p1;
+			faceIndices[faceIndex * 3 + 1] = p2;
+			faceIndices[faceIndex * 3 + 2] = p3;
+		}
+		faceFile.close();
 	}
 
 	// Setup data
@@ -217,10 +237,11 @@ int main()
 	glEnableVertexAttribArray(0);
 	glGenBuffers(1, &deformElementBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, deformElementBuffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * numEdges * 2, edgeIndices, GL_STATIC_DRAW);
+	//glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * numEdges * 2, edgeIndices, GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * numFaces * 3, faceIndices, GL_STATIC_DRAW);
 
 	// set up shader for deformable body
-	Shader deformShader("deformRender.vert", "deformRender.frag");
+	Shader deformShader("deformRender.vert", "deformRender.frag", "deformRender.geom");
 	
 	
 	// render loop ----------------------------
@@ -300,12 +321,32 @@ int main()
 		glm::mat4 model = glm::mat4(1.0f);
 
 		deformShader.use();
+		glm::vec3 lightPos(0.0f, -2.0f, 2.0f);
+		deformShader.setVec3("light.position", lightPos);
+		deformShader.setVec3("viewPos", cameraPos);
+
+		// light properties
+		glm::vec3 lightColor(1.0, 1.0, 1.0);
+		glm::vec3 diffuseColor = lightColor * glm::vec3(0.5f); // decrease the influence
+		glm::vec3 ambientColor = diffuseColor * glm::vec3(0.2f); // low influence
+		deformShader.setVec3("light.ambient", ambientColor);
+		deformShader.setVec3("light.diffuse", diffuseColor);
+		deformShader.setVec3("light.specular", 1.0f, 1.0f, 1.0f);
+
+		// material properties
+		deformShader.setVec3("material.ambient", 1.0f, 0.5f, 0.31f);
+		deformShader.setVec3("material.diffuse", 1.0f, 0.5f, 0.31f);
+		deformShader.setVec3("material.specular", 0.1f, 0.1f, 0.1f); // specular lighting doesn't have full effect on this object's material
+		deformShader.setFloat("material.shininess", 3.0f);
+
 		deformShader.setMat4("view", view);
 		deformShader.setMat4("projection", projection);
+		model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		deformShader.setMat4("model", model);
 
 		glBindVertexArray(deformVAO);
-		glDrawElements(GL_LINES, numEdges * 2, GL_UNSIGNED_INT, 0);
+		//glDrawElements(GL_LINES, numEdges * 2, GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_TRIANGLES, numFaces * 3, GL_UNSIGNED_INT, 0);
 
 		// check and call events and swap the buffers
 		glfwPollEvents();
