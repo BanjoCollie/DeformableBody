@@ -57,7 +57,7 @@ glm::vec3 * forces;
 float * startLength;
 float * startVolume;
 	// Parameters
-float timestep = 0.003;
+float timestep = 0.001;
 float mass = 50.0f;
 float inverseMassLimit = 1.0f;
 float kv = 1000000.0f; // Volume perserving constant
@@ -100,6 +100,11 @@ int main()
 	// deformable mesh
 
 	// load points
+	glm::mat4 transform = glm::mat4(1.0f);
+	transform = glm::translate(transform, glm::vec3(0.0f, startHeight + 0.5f, 0.0f));
+	transform = glm::rotate(transform, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	transform = glm::rotate(transform, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
 	std::ifstream pointFile;
 	pointFile.open("mesh/spot.1.node");
 	if (pointFile.is_open())
@@ -116,13 +121,11 @@ int main()
 		// now read actual data
 		while (pointFile >> index >> x >> y >> z)
 		{
-			float scale = 1.0f;
-			x *= scale;
-			y *= scale;
-			z *= scale;
-			y += startHeight;
-			pointCoords[index] = glm::vec3(x, y, z);
-			lastPointCoords[index] = glm::vec3(x, y, z);
+			glm::vec3 startPos = glm::vec3(x, y, z);
+			glm::vec3 transformed = transform * glm::vec4(startPos, 1.0f);
+			glm::vec3 newPos = glm::vec3(transformed[0], transformed[1], transformed[2]);
+			pointCoords[index] = newPos;
+			lastPointCoords[index] = newPos;
 		}
 		pointFile.close();
 	}
@@ -263,6 +266,11 @@ int main()
 		float currentFrame = glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
 		lastFrame = currentFrame;
+		//std::cout << (1.0f/deltaTime) << std::endl;
+		//if (deltaTime > timestep)
+		{
+			//deltaTime = timestep;
+		}
 		deltaTime = timestep;
 
 		// input
@@ -282,7 +290,7 @@ int main()
 			glm::vec3 e3 = pointCoords[tetraIndices[i*4+3]] - pointCoords[tetraIndices[i*4]];
 			float cv = (abs(glm::dot(e1, glm::cross(e2, e3)) / 6.0) - startVolume[i]);
 
-			//*
+			//* // With dampening
 			glm::vec3 dir, relVel;
 			dir = glm::normalize(glm::cross(e2 - e1, e3 - e1));
 			relVel = (3.0f * velocities[tetraIndices[i * 4]] - velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4 + 3]]);
@@ -300,7 +308,7 @@ int main()
 			relVel = (3.0f * velocities[tetraIndices[i * 4 + 3]] - velocities[tetraIndices[i * 4 + 1]] - velocities[tetraIndices[i * 4 + 2]] - velocities[tetraIndices[i * 4]]);
 			forces[tetraIndices[i * 4 + 3]] += (kv * cv - dampv * glm::dot(relVel, dir)) * dir;
 			//*/
-			/*
+			/* // Without dampening
 			forces[tetraIndices[i*4]] += kv * cv * glm::cross(e2-e1, e3-e1);
 			forces[tetraIndices[i*4 + 1]] += kv * cv * glm::cross(e3, e2);
 			forces[tetraIndices[i*4 + 2]] += kv * cv * glm::cross(e1, e3);
@@ -327,31 +335,38 @@ int main()
 			// integrate forces
 		for (int i = 0; i < numPoints; i++)
 		{
-			// Eular
+			// Friction
+			if (pointCoords[i][1] <= 0.01)
+			{
+				forces[i] += -velocities[i] / (deltaTime);
+			}
+
+			// Semi-implicit Eular
 			/*
 			velocities[i] += forces[i] * masses[i] * deltaTime;
 			velocities[i] += glm::vec3(0.0f, -9.8f, 0.0f) * deltaTime;
 			pointCoords[i] = pointCoords[i] + velocities[i] * deltaTime;
 			//*/
-			//*
 			// Verlet
+			//*
 			glm::vec3 currentPos = pointCoords[i];
 			forces[i] += glm::vec3(0.0f, -9.8f, 0.0f) / masses[i];
 			pointCoords[i] = 2.0f * pointCoords[i] - lastPointCoords[i] + deltaTime * deltaTime * forces[i] * masses[i];
 			velocities[i] = (pointCoords[i] - lastPointCoords[i]) / (2.0f * deltaTime);
 			lastPointCoords[i] = currentPos;
 			//*/
-			// Check for collisions
+			// Check for collisions with ground
 			if (pointCoords[i][1] <= 0.0f)
 			{
 				pointCoords[i][1] = 0.0f;
-				velocities[i][1] = 0.0f;
+				velocities[i] = (pointCoords[i] - lastPointCoords[i]) / (2.0f * deltaTime);
 			}
 		}
-		// deformation limits
-		//*
+
 		for (int i = 0; i < numEdges; i += 1)
 		{
+			// deformation limits
+			//*
 			glm::vec3 offset = pointCoords[edgeIndices[i * 2]] - pointCoords[edgeIndices[i * 2 + 1]];
 			glm::vec3 dir = glm::normalize(offset);
 			float len = glm::length(offset);
@@ -365,8 +380,63 @@ int main()
 					pointCoords[edgeIndices[i * 2 + 1]] += (1-massRatio) * (len - alpha * startLength[i]) * dir;
 				}
 			}
+			//*/
+
+			// Collisions with faces
+			/*
+			for (int j = 0; j < numFaces; j++)
+			{
+				// based on http://geomalgorithms.com/a06-_intersect-2.html
+				glm::vec3 p0 = pointCoords[edgeIndices[i * 2]];
+				glm::vec3 p1 = pointCoords[edgeIndices[i * 2 + 1]];
+				glm::vec3 v0 = pointCoords[faceIndices[j * 3]];
+				glm::vec3 v1 = pointCoords[faceIndices[j * 3 + 1]];
+				glm::vec3 v2 = pointCoords[faceIndices[j * 3 + 2]];
+
+				glm::vec3 u = v1 - v0; // One side of triangle
+				glm::vec3 v = v2 - v0; // 2nd side
+				glm::vec3 n = glm::cross(u, v); // Normal of triangle
+
+				// Get point on line that lies in the plane of the face
+				// Point on edge defined by p(r) = p0 + r*(p1 - p0)
+				float r = glm::dot(n, (v0 - p0)) / glm::dot(n, (p1 - p0));
+				glm::vec3 intersect = p0 + r * (p1 - p0);
+
+				// Now see if that point in the face
+				// face is defined by p(s,t) were p is in the triangle if s>=0, t>=0 and s+t<=1
+				glm::vec3 w = intersect - v0;
+				float denom = (glm::dot(u, v)*glm::dot(u, v) - glm::dot(u, u)*glm::dot(v, v));
+				float t = -1.0f;
+				float s = -1.0f;
+				if (denom != 0)
+				{
+					s = (glm::dot(u, v) * glm::dot(w, v) - glm::dot(v, v), glm::dot(w, u)) / denom;
+					t = (glm::dot(u, v) * glm::dot(w, u) - glm::dot(u, u), glm::dot(w, v)) / denom;
+				}
+
+				if ((t >= 0) && (s >= 0) && (t + s <= 1))
+				{
+					// Edge does intersect face
+					float d1 = glm::dot(p0 - v0, n);
+					float d2 = glm::dot(p0 - v0, n);
+					glm::vec3 displacement;
+					if (d1 < d2)
+					{
+						displacement = d1 * n;
+					}
+					else
+					{
+						displacement = d2 * n;
+					}
+
+					// Move edge outside of face
+					pointCoords[edgeIndices[i * 2]] += displacement;
+					pointCoords[edgeIndices[i * 2 + 1]] += displacement;
+				}
+
+			}
+			//*/
 		}
-		//*/
 
 		// Put data into buffers for openGL
 		glBindVertexArray(deformVAO);
@@ -399,12 +469,12 @@ int main()
 		// material properties
 		deformShader.setVec3("material.ambient", 1.0f, 0.5f, 0.31f);
 		deformShader.setVec3("material.diffuse", 1.0f, 0.5f, 0.31f);
-		deformShader.setVec3("material.specular", 0.1f, 0.1f, 0.1f); // specular lighting doesn't have full effect on this object's material
-		deformShader.setFloat("material.shininess", 3.0f);
+		deformShader.setVec3("material.specular", 0.5f, 0.5f, 0.5f); // specular lighting doesn't have full effect on this object's material
+		deformShader.setFloat("material.shininess", 36.0f);
 
 		deformShader.setMat4("view", view);
 		deformShader.setMat4("projection", projection);
-		model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		//model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 		deformShader.setMat4("model", model);
 
 		glBindVertexArray(deformVAO);
