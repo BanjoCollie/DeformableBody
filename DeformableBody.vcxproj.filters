@@ -31,5 +31,7 @@
     <None Include="deformRender.vert" />
     <None Include="deformRender.frag" />
     <None Include="deformRender.geom" />
+    <None Include="textured.vert" />
+    <None Include="textured.frag" />
   </ItemGroup>
 </Project>

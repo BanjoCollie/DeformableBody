@@ -136,6 +136,8 @@
     <None Include="deformRender.frag" />
     <None Include="deformRender.geom" />
     <None Include="deformRender.vert" />
+    <None Include="textured.frag" />
+    <None Include="textured.vert" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
